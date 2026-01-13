@@ -1,10 +1,12 @@
 """
-Snake game ("Изгиб Питона") implemented with OOP and Pygame.
+Project: "Изгиб Питона" (Snake game).
+
+Classic Snake game implemented with OOP and Pygame.
 
 Rules:
-- Snake moves continuously and cannot reverse instantly.
+- Snake moves continuously and cannot move backwards instantly.
 - When snake eats an apple, it grows by 1 segment.
-- Snake wraps around the field edges.
+- Snake wraps through the walls (appears on the opposite side).
 - If snake collides with itself, the game resets.
 """
 
@@ -16,81 +18,88 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-# --- Constants ---
+
+# ---------- Constants ----------
 SCREEN_WIDTH = 640
 SCREEN_HEIGHT = 480
 CELL_SIZE = 20
 
-GRID_WIDTH = SCREEN_WIDTH // CELL_SIZE
-GRID_HEIGHT = SCREEN_HEIGHT // CELL_SIZE
+GRID_WIDTH = SCREEN_WIDTH // CELL_SIZE   # 32
+GRID_HEIGHT = SCREEN_HEIGHT // CELL_SIZE  # 24
+
+FPS = 20
 
 BLACK = (0, 0, 0)
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
 
-FPS = 20
-
-# Directions as (dx, dy) in pixels
 UP = (0, -CELL_SIZE)
 DOWN = (0, CELL_SIZE)
 LEFT = (-CELL_SIZE, 0)
 RIGHT = (CELL_SIZE, 0)
 
 
-def wrap_position(pos: Tuple[int, int]) -> Tuple[int, int]:
+def wrap_position(position: Tuple[int, int]) -> Tuple[int, int]:
     """
-    Wrap a pixel position around screen edges.
+    Wrap a position through the walls.
+
+    Args:
+        position: (x, y) position in pixels.
+
+    Returns:
+        Wrapped position in pixels.
     """
-    x, y = pos
+    x, y = position
     return x % SCREEN_WIDTH, y % SCREEN_HEIGHT
 
 
 @dataclass
 class GameObject:
     """
-    Base class for any drawable object on the field.
+    Base class for game objects.
 
     Attributes:
-        position: Top-left pixel coordinates of the object (aligned to grid).
+        position: Object position (top-left) in pixels aligned to the grid.
         body_color: RGB color tuple.
     """
+
     position: Tuple[int, int]
     body_color: Tuple[int, int, int]
 
     def draw(self, surface: pygame.Surface) -> None:
         """
         Draw the object on the given surface.
+
         Must be overridden in subclasses.
         """
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement draw().")
 
 
 class Apple(GameObject):
     """
-    Apple object that appears at random grid-aligned positions.
+    Apple that appears on random grid cell.
     """
 
     def __init__(self) -> None:
         super().__init__(position=(0, 0), body_color=RED)
-        self.randomize_position(exclude_positions=[])
 
-    def randomize_position(self, exclude_positions: List[Tuple[int, int]]) -> None:
+    def randomize_position(self, forbidden: List[Tuple[int, int]]) -> None:
         """
-        Place the apple at a random position not occupied by the snake.
+        Set a new random position for the apple, not colliding with forbidden cells.
 
         Args:
-            exclude_positions: List of positions that apple cannot take.
+            forbidden: List of positions that are not allowed (snake cells).
         """
         while True:
             x = random.randrange(0, GRID_WIDTH) * CELL_SIZE
             y = random.randrange(0, GRID_HEIGHT) * CELL_SIZE
-            if (x, y) not in exclude_positions:
+            if (x, y) not in forbidden:
                 self.position = (x, y)
                 return
 
     def draw(self, surface: pygame.Surface) -> None:
         """
-        Draw the apple as a filled cell.
+        Draw the apple on the screen.
         """
         rect = pygame.Rect(self.position[0], self.position[1], CELL_SIZE, CELL_SIZE)
         pygame.draw.rect(surface, self.body_color, rect)
@@ -100,7 +109,7 @@ class Snake(GameObject):
     """
     Snake controlled by the player.
 
-    Snake is represented by a list of segment positions (top-left pixel coords).
+    Snake is stored as a list of positions (top-left pixel coords) of segments.
     """
 
     def __init__(self) -> None:
@@ -112,18 +121,17 @@ class Snake(GameObject):
         self.positions: List[Tuple[int, int]] = [self.position]
         self.direction: Tuple[int, int] = RIGHT
         self.next_direction: Optional[Tuple[int, int]] = None
-
         self._last_tail: Optional[Tuple[int, int]] = None
 
     def get_head_position(self) -> Tuple[int, int]:
         """
-        Return the current head position.
+        Get current snake head position.
         """
         return self.positions[0]
 
     def update_direction(self) -> None:
         """
-        Apply next_direction if it is set and is not the opposite direction.
+        Apply next_direction if it is set and not opposite to current direction.
         """
         if self.next_direction is None:
             return
@@ -131,7 +139,7 @@ class Snake(GameObject):
         dx, dy = self.direction
         ndx, ndy = self.next_direction
 
-        # Forbid instant reverse (e.g., RIGHT -> LEFT)
+        # Forbid instant reverse: RIGHT + LEFT = (0, 0)
         if (dx + ndx, dy + ndy) == (0, 0):
             self.next_direction = None
             return
@@ -141,15 +149,15 @@ class Snake(GameObject):
 
     def move(self) -> None:
         """
-        Move snake by one cell in the current direction.
+        Move snake by one cell.
 
-        Adds a new head and removes tail if the snake did not grow.
-        Stores removed tail in _last_tail for 'erasing the trail'.
+        Inserts new head and removes tail if snake did not grow.
+        Stores removed tail to erase it on draw.
         """
         head_x, head_y = self.get_head_position()
         dx, dy = self.direction
-        new_head = wrap_position((head_x + dx, head_y + dy))
 
+        new_head = wrap_position((head_x + dx, head_y + dy))
         self.positions.insert(0, new_head)
 
         self._last_tail = None
@@ -160,7 +168,7 @@ class Snake(GameObject):
 
     def reset(self) -> None:
         """
-        Reset snake to initial state after self-collision.
+        Reset snake to initial state (after self-collision).
         """
         center_x = (GRID_WIDTH // 2) * CELL_SIZE
         center_y = (GRID_HEIGHT // 2) * CELL_SIZE
@@ -174,23 +182,24 @@ class Snake(GameObject):
 
     def draw(self, surface: pygame.Surface) -> None:
         """
-        Draw the snake segments and erase the last tail cell if needed.
+        Draw the snake and erase the last tail cell to avoid leaving trail.
         """
-        # Draw segments
         for x, y in self.positions:
             rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
             pygame.draw.rect(surface, self.body_color, rect)
 
-        # Erase trail (where snake moved away)
         if self._last_tail is not None:
             tx, ty = self._last_tail
-            tail_rect = pygame.Rect(tx, ty, CELL_SIZE, CELL_SIZE)
-            pygame.draw.rect(surface, BLACK, tail_rect)
+            rect = pygame.Rect(tx, ty, CELL_SIZE, CELL_SIZE)
+            pygame.draw.rect(surface, BLACK, rect)
 
 
 def handle_keys(snake: Snake) -> None:
     """
-    Handle pygame events and set snake's next direction.
+    Process pygame events and update snake.next_direction.
+
+    Args:
+        snake: Snake instance to control.
     """
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -209,7 +218,13 @@ def handle_keys(snake: Snake) -> None:
 
 def main() -> None:
     """
-    Main game loop: create objects, update state, draw and refresh screen.
+    Main game loop:
+    - handle input
+    - update snake direction
+    - move snake
+    - check apple eating
+    - check self-collision (reset)
+    - draw objects and update display
     """
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -220,32 +235,32 @@ def main() -> None:
 
     snake = Snake()
     apple = Apple()
-    apple.randomize_position(exclude_positions=snake.positions)
+    apple.randomize_position(forbidden=snake.positions)
+    apple.draw(screen)
+    snake.draw(screen)
+    pygame.display.update()
 
     while True:
         clock.tick(FPS)
 
         handle_keys(snake)
-
         snake.update_direction()
         snake.move()
 
-        # Check apple eating
+        # Eat apple
         if snake.get_head_position() == apple.position:
             snake.length += 1
-            apple.randomize_position(exclude_positions=snake.positions)
+            apple.randomize_position(forbidden=snake.positions)
 
-        # Check self-collision (head overlaps body)
+        # Self collision -> reset
         head = snake.get_head_position()
         if head in snake.positions[1:]:
-            # Clear screen and reset objects
             screen.fill(BLACK)
             snake.reset()
-            apple.randomize_position(exclude_positions=snake.positions)
+            apple.randomize_position(forbidden=snake.positions)
 
         snake.draw(screen)
         apple.draw(screen)
-
         pygame.display.update()
 
 
